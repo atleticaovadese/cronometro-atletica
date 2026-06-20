@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0b1020" />
+  <title>Atletica · Cronometro Velocità</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="apple-touch-icon" href="icons/icon.svg" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>🏃 Cronometro Velocità</h1>
+  </header>
+
+  <main>
+    <!-- ============ SCHEDA: ATLETI ============ -->
+    <section class="tabpane" data-pane="atleti">
+      <div class="settings">
+        <label class="row">
+          <span>Distanza (m)</span>
+          <span class="val"><input id="distance" type="number" min="10" max="400" step="10" value="60"></span>
+        </label>
+        <label class="row">
+          <span>Verso di corsa nell'immagine</span>
+          <select id="direction" class="sel">
+            <option value="rtl">← da destra a sinistra</option>
+            <option value="ltr">→ da sinistra a destra</option>
+          </select>
+        </label>
+      </div>
+      <h2 class="sec-title">Atleti per corsia</h2>
+      <ul id="athletes" class="athletes"></ul>
+      <p class="hint">Compila solo le corsie usate. I nomi compaiono nei risultati.</p>
+    </section>
+
+    <!-- ============ SCHEDA: PARTENZA ============ -->
+    <section class="tabpane" data-pane="partenza" hidden>
+      <div class="display">
+        <div class="time" id="time">0.00</div>
+        <div class="phase" id="phase">Pronto</div>
+      </div>
+
+      <div class="settings">
+        <label class="row">
+          <span>"Pronti" → sparo (min)</span>
+          <span class="val"><input id="setSetMin" type="number" step="0.1" min="0.5" max="5" value="1.5"> s</span>
+        </label>
+        <label class="row">
+          <span>"Pronti" → sparo (max)</span>
+          <span class="val"><input id="setSetMax" type="number" step="0.1" min="0.5" max="5" value="2.5"> s</span>
+        </label>
+        <label class="row checkbox">
+          <span>Comandi vocali</span>
+          <input id="setVoice" type="checkbox" checked>
+        </label>
+        <label class="row checkbox">
+          <span>Arrivo automatico da camera</span>
+          <input id="useCamera" type="checkbox">
+        </label>
+      </div>
+
+      <!-- Flusso a due tempi: l'allenatore dà l'OK quando gli atleti sono fermi -->
+      <div class="controls">
+        <button id="btnMarks" class="btn primary">1 · "Ai vostri posti"</button>
+      </div>
+      <div class="controls">
+        <button id="btnSet" class="btn ok" disabled>2 · Atleti fermi → "Pronti" + sparo</button>
+      </div>
+      <div class="controls">
+        <button id="btnFinish" class="btn finish" disabled>🏁 Arrivo manuale</button>
+        <button id="btnReset" class="btn ghost">↺</button>
+      </div>
+
+      <h2 class="sec-title">Tempi di questa run</h2>
+      <ul id="laps" class="laps"></ul>
+      <div class="controls">
+        <button id="btnSaveRun" class="btn" disabled>💾 Salva run</button>
+        <button id="btnExport" class="btn ghost wide">⬇ Esporta CSV</button>
+      </div>
+    </section>
+
+    <!-- ============ SCHEDA: CAMERA ============ -->
+    <section class="tabpane" data-pane="camera" hidden>
+      <div class="camwrap">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <p class="status" id="camStatus">Fotocamera spenta.</p>
+
+      <!-- Diagnostica live: utile per il test sul telefono -->
+      <div class="diag" id="camDiag">
+        <div class="diag-item"><small>FPS</small><b id="diagFps">—</b></div>
+        <div class="diag-item"><small>Atleti</small><b id="diagDet">—</b></div>
+        <div class="diag-item"><small>Rilevamento</small><b id="diagArmed">off</b></div>
+      </div>
+
+      <div class="controls">
+        <button id="btnCamStart" class="btn primary">📷 Avvia fotocamera</button>
+        <button id="btnCamStop" class="btn ghost" disabled>Spegni</button>
+      </div>
+      <div class="controls">
+        <button id="btnRec" class="btn ok" disabled>⏺ Registra clip</button>
+        <button id="btnRecStop" class="btn ghost" disabled>⏹ Stop &amp; salva</button>
+      </div>
+
+      <h2 class="sec-title">Calibrazione</h2>
+      <div class="settings">
+        <label class="row">
+          <span>Linea traguardo (orizzontale %)</span>
+          <input id="calFinishX" type="range" min="0" max="100" value="50">
+        </label>
+        <label class="row">
+          <span>Corsie — bordo vicino (alto %)</span>
+          <input id="calLaneTop" type="range" min="0" max="100" value="25">
+        </label>
+        <label class="row">
+          <span>Corsie — bordo lontano (basso %)</span>
+          <input id="calLaneBottom" type="range" min="0" max="100" value="95">
+        </label>
+        <label class="row">
+          <span>Numero corsie</span>
+          <span class="val"><input id="calNLanes" type="number" min="1" max="8" value="6"></span>
+        </label>
+        <label class="row checkbox">
+          <span>Corsia 1 in alto nell'immagine</span>
+          <input id="calLane1Top" type="checkbox" checked>
+        </label>
+      </div>
+      <p class="hint">Telefono fermo su cavalletto, perpendicolare al traguardo. La linea rossa è il traguardo; le righe azzurre dividono le corsie.</p>
+    </section>
+
+    <!-- ============ SCHEDA: STORICO ============ -->
+    <section class="tabpane" data-pane="storico" hidden>
+      <h2 class="sec-title">Statistiche per atleta</h2>
+      <div id="stats" class="stats"></div>
+
+      <h2 class="sec-title">Run salvate</h2>
+      <div id="history" class="history"></div>
+
+      <div class="controls">
+        <button id="btnExport2" class="btn ghost wide">⬇ Esporta CSV</button>
+        <button id="btnClearAll" class="btn danger">🗑 Cancella tutto</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- Tab bar -->
+  <nav class="tabbar">
+    <button class="tab active" data-tab="atleti">👤 Atleti</button>
+    <button class="tab" data-tab="partenza">🔫 Partenza</button>
+    <button class="tab" data-tab="camera">📷 Camera</button>
+    <button class="tab" data-tab="storico">📊 Storico</button>
+  </nav>
+
+  <!-- Librerie rilevamento (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.22.0/dist/tf-core.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.22.0/dist/tf-converter.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.22.0/dist/tf-backend-webgl.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
+
+  <script src="js/state.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/camera.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(()=>{}));
+    }
+  </script>
+</body>
+</html>
