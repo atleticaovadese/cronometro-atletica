@@ -203,12 +203,20 @@ const Camera = (() => {
     const fx = cal.finishX * W;
     ctx.beginPath(); ctx.moveTo(fx, 0); ctx.lineTo(fx, H); ctx.stroke();
 
-    // atleti (centro busto)
-    ctx.fillStyle = '#43e97b';
+    // atleti (centro busto) + corsia assegnata (verifica calibrazione dal vivo)
+    ctx.font = 'bold 18px -apple-system, sans-serif';
     for (const pose of poses) {
       const c = torso(pose.keypoints, vw, vh);
       if (!c) continue;
-      ctx.beginPath(); ctx.arc(c.x * W, c.y * H, 7, 0, Math.PI * 2); ctx.fill();
+      const px = c.x * W, py = c.y * H;
+      const lane = laneFromY(c.y);
+      ctx.fillStyle = lane ? '#43e97b' : '#ffd166';
+      ctx.beginPath(); ctx.arc(px, py, 8, 0, Math.PI * 2); ctx.fill();
+      const label = lane ? ('C' + lane) : '?';
+      ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.7)';
+      ctx.strokeText(label, px + 12, py - 8);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(label, px + 12, py - 8);
     }
   }
 

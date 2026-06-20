@@ -120,17 +120,41 @@
     $('btnSaveRun').disabled = currentResults.length === 0;
   }
 
+  function laneOptions(selected) {
+    let opts = `<option value="">— manuale —</option>`;
+    for (let l = 1; l <= 6; l++) {
+      const nm = Store.athleteByLane(l);
+      opts += `<option value="${l}" ${selected === l ? 'selected' : ''}>Corsia ${l}${nm ? ' · ' + nm : ''}</option>`;
+    }
+    return opts;
+  }
+
   function renderLaps() {
     const ul = $('laps');
     ul.innerHTML = '';
-    currentResults.slice().sort((a, b) => a.time - b.time).forEach((r, i) => {
+    const sorted = currentResults.slice().sort((a, b) => a.time - b.time);
+    sorted.forEach((r, i) => {
       const li = document.createElement('li');
-      const who = r.lane != null
-        ? `Corsia ${r.lane}${r.name ? ' · ' + r.name : ''}`
-        : 'Arrivo manuale';
+      li.className = 'lap-edit';
       li.innerHTML = `
-        <span class="lap-label">${i + 1}° · ${who}</span>
-        <span class="lap-time">${fmt(r.time)}</span>`;
+        <span class="rank">${i + 1}°</span>
+        <select class="lane-sel">${laneOptions(r.lane)}</select>
+        <span class="lap-time">${fmt(r.time)}</span>
+        <button class="del" title="Elimina">✕</button>`;
+      // cambia corsia (correzione manuale se la camera sbaglia)
+      li.querySelector('.lane-sel').addEventListener('change', (e) => {
+        const v = e.target.value ? +e.target.value : null;
+        r.lane = v;
+        r.name = v != null ? Store.athleteByLane(v) : '';
+        renderLaps();
+      });
+      // elimina rilevamento sbagliato
+      li.querySelector('.del').addEventListener('click', () => {
+        const idx = currentResults.indexOf(r);
+        if (idx >= 0) currentResults.splice(idx, 1);
+        renderLaps();
+        $('btnSaveRun').disabled = currentResults.length === 0;
+      });
       ul.appendChild(li);
     });
   }
