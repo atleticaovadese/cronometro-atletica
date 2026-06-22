@@ -143,6 +143,7 @@ main { padding-bottom: 88px; }   /* spazio per la tab bar */
 input[type=range] { width: 50%; accent-color: var(--accent); }
 
 .btn.ok { background: linear-gradient(135deg, #ffd166, #f4a261); color: #1a1a1a; }
+.btn.ok.editing { background: linear-gradient(135deg, var(--accent-2), #2bb673); color: #04263a; box-shadow: 0 0 0 2px var(--accent-2) inset; }
 .btn.wide { flex: 1; }
 
 /* ===== Atleti ===== */
@@ -165,7 +166,7 @@ input[type=range] { width: 50%; accent-color: var(--accent); }
 .camwrap video, .camwrap canvas {
   position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
 }
-.camwrap canvas { pointer-events: none; }
+.camwrap canvas { pointer-events: none; touch-action: none; }
 
 .diag { display: flex; gap: 8px; margin: 8px 0; }
 .diag-item {

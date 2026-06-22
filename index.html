@@ -130,8 +130,19 @@
           <span>Corsia 1 in alto nell'immagine</span>
           <input id="calLane1Top" type="checkbox" checked>
         </label>
+        <label class="row">
+          <span>Qualità / velocità camera</span>
+          <select id="calQuality" class="sel">
+            <option value="fast">Veloce (più fps)</option>
+            <option value="hd">Qualità (più dettaglio)</option>
+          </select>
+        </label>
       </div>
-      <p class="hint">Telefono fermo su cavalletto, perpendicolare al traguardo. La linea rossa è il traguardo; le righe azzurre dividono le corsie.</p>
+      <div class="controls">
+        <button id="btnEditLines" class="btn ok">✏️ Modifica linee</button>
+        <button id="btnRedistribute" class="btn ghost wide">↔ Ridistribuisci corsie</button>
+      </div>
+      <p class="hint">Telefono fermo su cavalletto, perpendicolare al traguardo. Linea rossa = traguardo; righe azzurre = corsie. Con <b>Modifica linee</b> attivo, <b>trascina</b> ogni riga (anche una sola corsia per volta) usando i pallini a sinistra/in alto. "Veloce" alza gli fps di analisi.</p>
     </section>
 
     <!-- ============ SCHEDA: STORICO ============ -->

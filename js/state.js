@@ -11,7 +11,9 @@ const Store = (() => {
     runs: [],                     // storico run: {ts, distance, results:[{lane,name,time}]}
     calibration: {                // calibrazione camera persistente
       finishX: 0.5, laneTop: 0.25, laneBottom: 0.95, nLanes: 6, lane1Top: true,
+      laneEdges: null,            // bordi per-corsia (normalizzati); null = bande uguali
     },
+    quality: 'fast',              // 'fast' (più fps) | 'hd' (più dettaglio)
   });
 
   let state = load();
@@ -45,6 +47,9 @@ const Store = (() => {
 
   function setCalibration(partial) { Object.assign(state.calibration, partial); save(); }
   function getCalibration() { return { ...state.calibration }; }
+
+  function setQuality(q) { state.quality = q; save(); }
+  function getQuality() { return state.quality; }
 
   function addRun(results) {
     const run = {
@@ -101,6 +106,6 @@ const Store = (() => {
   }
 
   return { get, save, setAthlete, athleteByLane, setDistance, setDirection,
-           setCalibration, getCalibration,
+           setCalibration, getCalibration, setQuality, getQuality,
            addRun, clearRuns, deleteRun, athleteStats, toCSV };
 })();

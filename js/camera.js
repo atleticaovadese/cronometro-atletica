@@ -21,9 +21,17 @@ const Camera = (() => {
   let onFinish = null;
   let onStatus = () => {};
   let onDiag = () => {};
+  let onCal = () => {};       // chiamata quando la calibrazione cambia (drag)
 
   // diagnostica fps
   let fpsEma = 0, lastFrameT = 0, lastDiagT = 0;
+
+  // qualità cattura ('fast' = più fps, 'hd' = più dettaglio)
+  let quality = 'fast';
+
+  // calibrazione interattiva
+  let editing = false;
+  let dragTarget = null;     // {type:'finish'} | {type:'edge', i}
 
   // Calibrazione (valori normalizzati 0..1)
   let cal = {
@@ -33,7 +41,14 @@ const Camera = (() => {
     nLanes: 6,
     lane1Top: true,          // true: corsia 1 in alto nell'immagine
     direction: 'rtl',        // verso di corsa: 'ltr' o 'rtl'
+    laneEdges: null,         // bordi per-corsia (lung. nLanes+1); null = ricalcola uguali
   };
+
+  // ricalcola i bordi corsia in modo uniforme tra laneTop e laneBottom
+  function redistribute() {
+    const n = cal.nLanes, t = cal.laneTop, b = cal.laneBottom;
+    cal.laneEdges = Array.from({ length: n + 1 }, (_, i) => t + (b - t) * i / n);
+  }
 
   // tracking per-atleta
   let tracks = new Map();    // id -> {prevX, prevY, prevT}
@@ -61,14 +76,23 @@ const Camera = (() => {
 
   async function start(videoEl, canvasEl) {
     video = videoEl; canvas = canvasEl; ctx = canvas.getContext('2d');
+    if (!canvas._calBound) {
+      canvas.addEventListener('pointerdown', onDown);
+      canvas.addEventListener('pointermove', onMove);
+      canvas.addEventListener('pointerup', onUp);
+      canvas.addEventListener('pointercancel', onUp);
+      canvas._calBound = true;
+    }
     setStatus('Avvio fotocamera…');
+    // risoluzione più bassa = analisi AI più veloce = più fps
+    const res = quality === 'hd' ? { w: 1280, h: 720 } : { w: 640, h: 360 };
     stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
       video: {
         facingMode: { ideal: 'environment' },
-        width:  { ideal: 1280 },
-        height: { ideal: 720 },
-        frameRate: { ideal: 60 },   // chiediamo 60; il browser può dare 30
+        width:  { ideal: res.w },
+        height: { ideal: res.h },
+        frameRate: { ideal: 60 },   // chiediamo 60; il browser può dare meno
       },
     });
     video.srcObject = stream;
@@ -91,8 +115,16 @@ const Camera = (() => {
     if (video) video.srcObject = null;
   }
 
-  function setCalibration(partial) { Object.assign(cal, partial); }
-  function getCalibration() { return { ...cal }; }
+  function setCalibration(partial) {
+    Object.assign(cal, partial);
+    if (partial.laneEdges) { cal.laneEdges = partial.laneEdges.slice(); return; }
+    // se cambiano banda o numero corsie (o non esistono bordi), ridistribuisci
+    if ('laneTop' in partial || 'laneBottom' in partial || 'nLanes' in partial || !cal.laneEdges) {
+      redistribute();
+    }
+  }
+  function getCalibration() { return { ...cal, laneEdges: cal.laneEdges ? cal.laneEdges.slice() : null }; }
+  function setCaptureQuality(q) { quality = q; }
 
   function arm(startT0, finishCb) {
     t0 = startT0; onFinish = finishCb;
@@ -103,13 +135,17 @@ const Camera = (() => {
   function disarm() { armed = false; setStatus('Rilevamento in pausa.'); }
   function isArmed() { return armed; }
 
-  // corsia dalla posizione verticale normalizzata
+  // corsia dalla posizione verticale normalizzata (bordi per-corsia)
   function laneFromY(y) {
-    if (y < cal.laneTop || y > cal.laneBottom) return null;
-    const f = (y - cal.laneTop) / (cal.laneBottom - cal.laneTop);
-    let idx = Math.floor(f * cal.nLanes); // 0..nLanes-1
-    idx = Math.max(0, Math.min(cal.nLanes - 1, idx));
-    return cal.lane1Top ? idx + 1 : cal.nLanes - idx;
+    const e = cal.laneEdges;
+    if (!e || e.length < 2) return null;
+    if (y < e[0] || y > e[e.length - 1]) return null;
+    let idx = 0;
+    for (let i = 0; i < e.length - 1; i++) {
+      if (y >= e[i] && y < e[i + 1]) { idx = i; break; }
+      if (i === e.length - 2) idx = i; // bordo inferiore incluso
+    }
+    return cal.lane1Top ? idx + 1 : (e.length - 1 - idx);
   }
 
   // centro busto (media spalle+anche) in coord normalizzate; null se incerto
@@ -190,18 +226,35 @@ const Camera = (() => {
     const H = canvas.height = canvas.clientHeight;
     ctx.clearRect(0, 0, W, H);
 
-    // banda corsie
-    ctx.strokeStyle = 'rgba(76,201,240,.5)';
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= cal.nLanes; i++) {
-      const y = (cal.laneTop + (cal.laneBottom - cal.laneTop) * i / cal.nLanes) * H;
+    const edges = cal.laneEdges || [];
+    // righe di confine corsia + (in modalità modifica) maniglie + numero corsia
+    for (let i = 0; i < edges.length; i++) {
+      const y = edges[i] * H;
+      ctx.strokeStyle = 'rgba(76,201,240,.7)';
+      ctx.lineWidth = (dragTarget && dragTarget.type === 'edge' && dragTarget.i === i) ? 4 : 1.5;
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      if (editing) {
+        ctx.fillStyle = '#4cc9f0';
+        ctx.beginPath(); ctx.arc(22, y, 11, 0, Math.PI * 2); ctx.fill();
+      }
     }
-    // linea traguardo
-    ctx.strokeStyle = '#ff5d73';
-    ctx.lineWidth = 4;
+    // numero corsia al centro di ogni banda
+    ctx.font = 'bold 15px -apple-system, sans-serif';
+    ctx.fillStyle = 'rgba(76,201,240,.9)';
+    for (let i = 0; i < edges.length - 1; i++) {
+      const yc = (edges[i] + edges[i + 1]) / 2 * H;
+      const laneNum = cal.lane1Top ? i + 1 : (edges.length - 1 - i);
+      ctx.fillText('C' + laneNum, W - 36, yc + 5);
+    }
+    // linea traguardo (+ maniglia in alto se in modifica)
     const fx = cal.finishX * W;
+    ctx.strokeStyle = '#ff5d73';
+    ctx.lineWidth = (dragTarget && dragTarget.type === 'finish') ? 6 : 4;
     ctx.beginPath(); ctx.moveTo(fx, 0); ctx.lineTo(fx, H); ctx.stroke();
+    if (editing) {
+      ctx.fillStyle = '#ff5d73';
+      ctx.beginPath(); ctx.arc(fx, 22, 11, 0, Math.PI * 2); ctx.fill();
+    }
 
     // atleti (centro busto) + corsia assegnata (verifica calibrazione dal vivo)
     ctx.font = 'bold 18px -apple-system, sans-serif';
@@ -220,6 +273,42 @@ const Camera = (() => {
     }
   }
 
+  // ---- calibrazione interattiva (trascina linee sul video) ----
+  function evToNorm(e) {
+    const r = canvas.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)),
+      y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)),
+    };
+  }
+  function pickTarget(p) {
+    const edges = cal.laneEdges || [];
+    let best = null, bestD = 0.06;       // tolleranza tocco
+    if (Math.abs(p.x - cal.finishX) < bestD) { best = { type: 'finish' }; bestD = Math.abs(p.x - cal.finishX); }
+    for (let i = 0; i < edges.length; i++) {
+      const d = Math.abs(p.y - edges[i]);
+      if (d < bestD) { best = { type: 'edge', i }; bestD = d; }
+    }
+    return best;
+  }
+  function onDown(e) { if (!editing) return; e.preventDefault(); dragTarget = pickTarget(evToNorm(e)); }
+  function onMove(e) {
+    if (!editing || !dragTarget) return;
+    e.preventDefault();
+    const p = evToNorm(e);
+    if (dragTarget.type === 'finish') {
+      cal.finishX = p.x;
+    } else {
+      const ed = cal.laneEdges, i = dragTarget.i;
+      const lo = i > 0 ? ed[i - 1] + 0.01 : 0;
+      const hi = i < ed.length - 1 ? ed[i + 1] - 0.01 : 1;
+      ed[i] = Math.max(lo, Math.min(hi, p.y));
+      cal.laneTop = ed[0]; cal.laneBottom = ed[ed.length - 1];
+    }
+  }
+  function onUp() { if (!editing || !dragTarget) return; dragTarget = null; onCal(getCalibration()); }
+  function setEditMode(b) { editing = b; if (canvas) canvas.style.pointerEvents = b ? 'auto' : 'none'; }
+
   function loop() {
     if (!running) return;
     if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
@@ -234,7 +323,9 @@ const Camera = (() => {
 
   function getStream() { return stream; }
 
-  return { start, stop, setCalibration, getCalibration, arm, disarm, isArmed, getStream,
+  return { start, stop, setCalibration, getCalibration, setCaptureQuality,
+           setEditMode, arm, disarm, isArmed, getStream,
            onStatusChange: (cb) => { onStatus = cb; },
-           onDiagChange: (cb) => { onDiag = cb; } };
+           onDiagChange: (cb) => { onDiag = cb; },
+           onCalChange: (cb) => { onCal = cb; } };
 })();

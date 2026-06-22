@@ -313,16 +313,17 @@
     $('camStatus').textContent = 'Fotocamera spenta.';
   }
 
+  // muovere uno slider di banda RIDISTRIBUISCE le corsie in modo uniforme
   function applyCalibration() {
-    const cal = {
+    Camera.setCalibration({
       finishX: (+$('calFinishX').value) / 100,
       laneTop: (+$('calLaneTop').value) / 100,
       laneBottom: (+$('calLaneBottom').value) / 100,
       nLanes: +$('calNLanes').value || 6,
       lane1Top: $('calLane1Top').checked,
-    };
-    Store.setCalibration(cal);                       // persistente
-    Camera.setCalibration({ ...cal, direction: $('direction').value });
+      direction: $('direction').value,
+    });
+    Store.setCalibration(Camera.getCalibration());   // include i bordi aggiornati
   }
   ['calFinishX','calLaneTop','calLaneBottom','calNLanes','calLane1Top']
     .forEach(id => $(id).addEventListener('input', applyCalibration));
@@ -330,10 +331,30 @@
   function loadCalibrationUI() {
     const c = Store.getCalibration();
     $('calFinishX').value    = Math.round(c.finishX * 100);
-    $('calLaneTop').value    = Math.round(c.laneTop * 100);
-    $('calLaneBottom').value = Math.round(c.laneBottom * 100);
+    $('calLaneTop').value    = Math.round((c.laneEdges ? c.laneEdges[0] : c.laneTop) * 100);
+    $('calLaneBottom').value = Math.round((c.laneEdges ? c.laneEdges[c.laneEdges.length - 1] : c.laneBottom) * 100);
     $('calNLanes').value     = c.nLanes;
     $('calLane1Top').checked = c.lane1Top;
+    $('calQuality').value    = Store.getQuality();
+  }
+
+  // trascinamento linee sul video -> persisti e aggiorna gli slider
+  Camera.onCalChange((cal) => {
+    Store.setCalibration(cal);
+    $('calFinishX').value = Math.round(cal.finishX * 100);
+    if (cal.laneEdges && cal.laneEdges.length) {
+      $('calLaneTop').value    = Math.round(cal.laneEdges[0] * 100);
+      $('calLaneBottom').value = Math.round(cal.laneEdges[cal.laneEdges.length - 1] * 100);
+    }
+  });
+
+  let editLines = false;
+  function toggleEdit() {
+    editLines = !editLines;
+    Camera.setEditMode(editLines);
+    const b = $('btnEditLines');
+    b.textContent = editLines ? '✓ Fine modifica' : '✏️ Modifica linee';
+    b.classList.toggle('editing', editLines);
   }
 
   // ---- diagnostica live ----
@@ -400,6 +421,13 @@
   $('btnCamStop').addEventListener('click', camStop);
   $('btnRec').addEventListener('click', recStart);
   $('btnRecStop').addEventListener('click', recStop);
+  $('btnEditLines').addEventListener('click', toggleEdit);
+  $('btnRedistribute').addEventListener('click', applyCalibration);
+  $('calQuality').addEventListener('change', (e) => {
+    Store.setQuality(e.target.value);
+    Camera.setCaptureQuality(e.target.value);
+    $('camStatus').textContent = 'Qualità impostata: spegni e riaccendi la fotocamera per applicarla.';
+  });
 
   if ('speechSynthesis' in window) {
     window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
@@ -408,8 +436,10 @@
   // init
   $('distance').value = Store.get().distance;
   $('direction').value = Store.get().direction;
+  // carica la calibrazione salvata NELLA camera (inclusi i bordi per-corsia)
+  Camera.setCalibration({ ...Store.getCalibration(), direction: Store.get().direction });
+  Camera.setCaptureQuality(Store.getQuality());
   loadCalibrationUI();
-  applyCalibration();              // applica anche la direzione alla camera
   renderAthletes();
   resetRun(true);
 })();
