@@ -336,6 +336,8 @@
     $('calNLanes').value     = c.nLanes;
     $('calLane1Top').checked = c.lane1Top;
     $('calQuality').value    = Store.getQuality();
+    $('calMode').value       = Store.getDetectMode();
+    $('calSensitivity').value = Store.getLineSensitivity();
   }
 
   // trascinamento linee sul video -> persisti e aggiorna gli slider
@@ -428,6 +430,15 @@
     Camera.setCaptureQuality(e.target.value);
     $('camStatus').textContent = 'Qualità impostata: spegni e riaccendi la fotocamera per applicarla.';
   });
+  $('calMode').addEventListener('change', (e) => {
+    Store.setDetectMode(e.target.value);
+    Camera.setDetectMode(e.target.value);
+    $('camStatus').textContent = 'Modalità cambiata: spegni e riaccendi la fotocamera per applicarla.';
+  });
+  $('calSensitivity').addEventListener('input', (e) => {
+    Store.setLineSensitivity(+e.target.value);
+    Camera.setLineSensitivity(+e.target.value);   // applicata subito, niente riavvio
+  });
 
   if ('speechSynthesis' in window) {
     window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
@@ -439,6 +450,8 @@
   // carica la calibrazione salvata NELLA camera (inclusi i bordi per-corsia)
   Camera.setCalibration({ ...Store.getCalibration(), direction: Store.get().direction });
   Camera.setCaptureQuality(Store.getQuality());
+  Camera.setDetectMode(Store.getDetectMode());
+  Camera.setLineSensitivity(Store.getLineSensitivity());
   loadCalibrationUI();
   renderAthletes();
   resetRun(true);

@@ -14,6 +14,8 @@ const Store = (() => {
       laneEdges: null,            // bordi per-corsia (normalizzati); null = bande uguali
     },
     quality: 'fast',              // 'fast' (più fps) | 'hd' (più dettaglio)
+    detectMode: 'ai',             // 'ai' (MoveNet) | 'line' (striscia, veloce)
+    lineSensitivity: 30,          // soglia modalità linea (più bassa = più sensibile)
   });
 
   let state = load();
@@ -50,6 +52,11 @@ const Store = (() => {
 
   function setQuality(q) { state.quality = q; save(); }
   function getQuality() { return state.quality; }
+
+  function setDetectMode(m) { state.detectMode = m; save(); }
+  function getDetectMode() { return state.detectMode; }
+  function setLineSensitivity(v) { state.lineSensitivity = v; save(); }
+  function getLineSensitivity() { return state.lineSensitivity; }
 
   function addRun(results) {
     const run = {
@@ -107,5 +114,6 @@ const Store = (() => {
 
   return { get, save, setAthlete, athleteByLane, setDistance, setDirection,
            setCalibration, getCalibration, setQuality, getQuality,
+           setDetectMode, getDetectMode, setLineSensitivity, getLineSensitivity,
            addRun, clearRuns, deleteRun, athleteStats, toCSV };
 })();

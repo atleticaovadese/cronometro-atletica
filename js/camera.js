@@ -29,6 +29,13 @@ const Camera = (() => {
   // qualità cattura ('fast' = più fps, 'hd' = più dettaglio)
   let quality = 'fast';
 
+  // modalità rilevamento: 'ai' (MoveNet) | 'line' (striscia di pixel, veloce)
+  let detectMode = 'ai';
+  let lineSensitivity = 30;
+  let pcanvas = null, pctx = null, prevGray = null;
+  let lastTrig = [], lineTriggers = 0;
+  const PW = 192, PH = 144, STRIP = 2;   // buffer di analisi + semilarghezza striscia
+
   // calibrazione interattiva
   let editing = false;
   let dragTarget = null;     // {type:'finish'} | {type:'edge', i}
@@ -58,11 +65,20 @@ const Camera = (() => {
 
   function setStatus(s) { onStatus(s); }
 
+  async function pickBackend() {
+    // WebGPU è più veloce dove supportato (iPhone recenti); fallback a WebGL
+    for (const b of ['webgpu', 'webgl']) {
+      try { if (await tf.setBackend(b)) { await tf.ready(); return b; } } catch (e) {}
+    }
+    await tf.ready();
+    return tf.getBackend();
+  }
+
   async function loadModel() {
     if (detector) return;
     setStatus('Carico il modello di rilevamento…');
-    await tf.setBackend('webgl');
-    await tf.ready();
+    const backend = await pickBackend();
+    setStatus('Backend: ' + backend + ' — carico il modello…');
     detector = await poseDetection.createDetector(
       poseDetection.SupportedModels.MoveNet,
       {
@@ -71,7 +87,7 @@ const Camera = (() => {
         trackerType: poseDetection.TrackerType.BoundingBox,
       }
     );
-    setStatus('Modello pronto.');
+    setStatus('Pronto · backend ' + tf.getBackend());
   }
 
   async function start(videoEl, canvasEl) {
@@ -85,7 +101,7 @@ const Camera = (() => {
     }
     setStatus('Avvio fotocamera…');
     // risoluzione più bassa = analisi AI più veloce = più fps
-    const res = quality === 'hd' ? { w: 1280, h: 720 } : { w: 640, h: 360 };
+    const res = quality === 'hd' ? { w: 1280, h: 720 } : { w: 480, h: 270 };
     stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
       video: {
@@ -104,7 +120,11 @@ const Camera = (() => {
     const s = track.getSettings ? track.getSettings() : {};
     setStatus(`Camera attiva ${s.width||'?'}×${s.height||'?'} @ ${s.frameRate||'?'}fps`);
 
-    await loadModel();
+    if (detectMode === 'ai') {
+      await loadModel();
+    } else {
+      setStatus('Modalità LINEA (veloce) · nessun modello AI da caricare');
+    }
     running = true;
     loop();
   }
@@ -129,6 +149,7 @@ const Camera = (() => {
   function arm(startT0, finishCb) {
     t0 = startT0; onFinish = finishCb;
     tracks.clear(); recorded.clear();
+    prevGray = null; lastTrig = []; lineTriggers = 0;   // reset modalità linea
     armed = true;
     setStatus('Rilevamento arrivi ATTIVO.');
   }
@@ -146,6 +167,53 @@ const Camera = (() => {
       if (i === e.length - 2) idx = i; // bordo inferiore incluso
     }
     return cal.lane1Top ? idx + 1 : (e.length - 1 - idx);
+  }
+
+  // ---- MODALITÀ LINEA: differenza di pixel su una striscia al traguardo ----
+  // Per ogni corsia misura quanto cambia la striscia tra due fotogrammi; un picco
+  // = qualcuno sta attraversando. Niente rete neurale -> gira agli fps della camera.
+  function lineDetect(now) {
+    if (!pcanvas) {
+      pcanvas = document.createElement('canvas');
+      pcanvas.width = PW; pcanvas.height = PH;
+      pctx = pcanvas.getContext('2d', { willReadFrequently: true });
+    }
+    pctx.drawImage(video, 0, 0, PW, PH);          // frame intero "stirato" nel buffer
+    const data = pctx.getImageData(0, 0, PW, PH).data;
+
+    const cx = Math.round(cal.finishX * PW);
+    const x0 = Math.max(0, cx - STRIP), x1 = Math.min(PW - 1, cx + STRIP);
+
+    // luminanza media della striscia, riga per riga
+    const cur = new Float32Array(PH);
+    for (let r = 0; r < PH; r++) {
+      let s = 0, c = 0;
+      for (let x = x0; x <= x1; x++) {
+        const idx = (r * PW + x) * 4;
+        s += data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114; c++;
+      }
+      cur[r] = s / c;
+    }
+
+    if (prevGray && armed && t0 !== null) {
+      const e = cal.laneEdges || [];
+      for (let i = 0; i < e.length - 1; i++) {
+        const r0 = Math.max(0, Math.floor(e[i] * PH));
+        const r1 = Math.min(PH, Math.ceil(e[i + 1] * PH));
+        let diff = 0, n = 0;
+        for (let r = r0; r < r1; r++) { diff += Math.abs(cur[r] - prevGray[r]); n++; }
+        const act = n ? diff / n : 0;
+        const lane = cal.lane1Top ? i + 1 : (e.length - 1 - i);
+        const last = lastTrig[lane] || 0;
+        // fronte di salita oltre soglia + tempo morto per corsia (no doppioni)
+        if (act > lineSensitivity && (now - last) > 600) {
+          lastTrig[lane] = now;
+          lineTriggers++;
+          if (onFinish) onFinish({ lane, time: now - t0 });
+        }
+      }
+    }
+    prevGray = cur;
   }
 
   // centro busto (media spalle+anche) in coord normalizzate; null se incerto
@@ -175,26 +243,39 @@ const Camera = (() => {
     return { crossT, crossY };
   }
 
-  async function processFrame(now) {
-    if (!detector || !video.videoWidth) return;
-    const vw = video.videoWidth, vh = video.videoHeight;
-
-    // fps reali (media esponenziale)
+  function calcFps(now) {
     if (lastFrameT) {
       const inst = 1000 / Math.max(1, now - lastFrameT);
       fpsEma = fpsEma ? fpsEma * 0.85 + inst * 0.15 : inst;
     }
     lastFrameT = now;
+  }
 
+  async function processFrame(now) {
+    if (!video.videoWidth) return;
+    calcFps(now);
+    const vw = video.videoWidth, vh = video.videoHeight;
+
+    // --- MODALITÀ LINEA (veloce, senza AI) ---
+    if (detectMode === 'line') {
+      lineDetect(now);
+      drawOverlay([], vw, vh);
+      if (now - lastDiagT > 200) {
+        lastDiagT = now;
+        onDiag({ fps: Math.round(fpsEma), detected: lineTriggers, armed });
+      }
+      return;
+    }
+
+    // --- MODALITÀ AI (MoveNet) ---
+    if (!detector) return;
     let poses = [];
     try {
       poses = await detector.estimatePoses(video, { maxPoses: 6, flipHorizontal: false });
     } catch (e) { return; }
 
-    // disegna overlay
     drawOverlay(poses, vw, vh);
 
-    // diagnostica ~5 volte/sec
     if (now - lastDiagT > 200) {
       lastDiagT = now;
       const detected = poses.filter(p => torso(p.keypoints, vw, vh)).length;
@@ -254,6 +335,12 @@ const Camera = (() => {
     if (editing) {
       ctx.fillStyle = '#ff5d73';
       ctx.beginPath(); ctx.arc(fx, 22, 11, 0, Math.PI * 2); ctx.fill();
+    }
+    // striscia di analisi (modalità linea)
+    if (detectMode === 'line') {
+      const sw = ((STRIP * 2 + 1) / PW) * W;
+      ctx.fillStyle = 'rgba(255,93,115,.20)';
+      ctx.fillRect(fx - sw / 2, 0, sw, H);
     }
 
     // atleti (centro busto) + corsia assegnata (verifica calibrazione dal vivo)
@@ -322,9 +409,12 @@ const Camera = (() => {
   }
 
   function getStream() { return stream; }
+  function setDetectMode(m) { detectMode = m; }
+  function setLineSensitivity(v) { lineSensitivity = v; }
 
   return { start, stop, setCalibration, getCalibration, setCaptureQuality,
-           setEditMode, arm, disarm, isArmed, getStream,
+           setEditMode, setDetectMode, setLineSensitivity,
+           arm, disarm, isArmed, getStream,
            onStatusChange: (cb) => { onStatus = cb; },
            onDiagChange: (cb) => { onDiag = cb; },
            onCalChange: (cb) => { onCal = cb; } };

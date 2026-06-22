@@ -44,25 +44,43 @@ const StartSequence = (() => {
     window.speechSynthesis.speak(u);
   }
 
-  // Burst di rumore con inviluppo percussivo = "sparo".
+  // "Sparo" sintetico forte e secco: crack di rumore + boom a bassa freq,
+  // con compressore + guadagno per massima udibilità su cassa Bluetooth.
   function playShot() {
     const ctx = ensureCtx();
-    const dur = 0.22;
-    const buffer = ctx.createBuffer(1, ctx.sampleRate * dur, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < data.length; i++) {
-      const decay = Math.pow(1 - i / data.length, 2);
-      data[i] = (Math.random() * 2 - 1) * decay;
+    const t = ctx.currentTime;
+
+    // master: compressore (alza il volume percepito) + gain alto
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -28; comp.ratio.value = 12;
+    comp.attack.value = 0.001; comp.release.value = 0.1;
+    const master = ctx.createGain();
+    master.gain.value = 4.0;            // volume elevato (un colpo deve "spaccare")
+    comp.connect(master).connect(ctx.destination);
+
+    // 1) crack: rumore bianco con decadimento rapidissimo
+    const dur = 0.25;
+    const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) {
+      const decay = Math.pow(1 - i / d.length, 3);
+      d[i] = (Math.random() * 2 - 1) * decay;
     }
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(1.0, ctx.currentTime);
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.value = 3500;
-    src.connect(lp).connect(gain).connect(ctx.destination);
-    src.start();
+    const noise = ctx.createBufferSource(); noise.buffer = buf;
+    const ng = ctx.createGain(); ng.gain.value = 1.0;
+    noise.connect(ng).connect(comp);
+    noise.start(t);
+
+    // 2) boom: sinusoide bassa che scende, dà "corpo" allo sparo
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(140, t);
+    osc.frequency.exponentialRampToValueAtTime(50, t + 0.12);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(1.0, t);
+    og.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    osc.connect(og).connect(comp);
+    osc.start(t); osc.stop(t + 0.2);
   }
 
   // Passo 1: "Ai vostri posti"
