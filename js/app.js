@@ -295,6 +295,7 @@
       await Camera.start($('video'), $('overlay'));
       $('btnCamStop').disabled = false;
       $('btnRec').disabled = false;
+      $('btnTest').disabled = false;
       acquireWakeLock();
     } catch (e) {
       $('camStatus').textContent = 'Errore camera: ' + (e.message || e);
@@ -303,12 +304,14 @@
   }
   function camStop() {
     recStop();
+    if (testing) toggleTest();      // ferma eventuale test
     Camera.stop();
     releaseWakeLock();
     $('btnCamStart').disabled = false;
     $('btnCamStop').disabled = true;
     $('btnRec').disabled = true;
     $('btnRecStop').disabled = true;
+    $('btnTest').disabled = true;
     $('diagFps').textContent = '—'; $('diagDet').textContent = '—'; $('diagArmed').textContent = 'off';
     $('camStatus').textContent = 'Fotocamera spenta.';
   }
@@ -349,6 +352,21 @@
       $('calLaneBottom').value = Math.round(cal.laneEdges[cal.laneEdges.length - 1] * 100);
     }
   });
+
+  // arma il rilevamento al volo per provare gli arrivi senza fare la partenza
+  let testing = false;
+  function toggleTest() {
+    testing = !testing;
+    const b = $('btnTest');
+    if (testing) {
+      Camera.arm(performance.now(), onAutoFinish);
+      b.textContent = '⏹ Ferma test'; b.classList.add('editing');
+      $('camStatus').textContent = 'TEST attivo: attraversa il traguardo, i tempi compaiono in "Partenza".';
+    } else {
+      Camera.disarm();
+      b.textContent = '🎯 Test arrivo (arma rilevamento)'; b.classList.remove('editing');
+    }
+  }
 
   let editLines = false;
   function toggleEdit() {
@@ -424,6 +442,7 @@
   $('btnRec').addEventListener('click', recStart);
   $('btnRecStop').addEventListener('click', recStop);
   $('btnEditLines').addEventListener('click', toggleEdit);
+  $('btnTest').addEventListener('click', toggleTest);
   $('btnRedistribute').addEventListener('click', applyCalibration);
   $('calQuality').addEventListener('change', (e) => {
     Store.setQuality(e.target.value);

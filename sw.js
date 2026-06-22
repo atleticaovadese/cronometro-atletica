@@ -1,5 +1,5 @@
 /* sw.js — service worker minimale: cache offline-first dei file statici. */
-const CACHE = 'atletica-v9';
+const CACHE = 'atletica-v10';
 const ASSETS = [
   './',
   './index.html',

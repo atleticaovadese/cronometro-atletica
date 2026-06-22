@@ -15,7 +15,7 @@ const Store = (() => {
     },
     quality: 'fast',              // 'fast' (più fps) | 'hd' (più dettaglio)
     detectMode: 'ai',             // 'ai' (MoveNet) | 'line' (striscia, veloce)
-    lineSensitivity: 30,          // soglia modalità linea (più bassa = più sensibile)
+    lineSensitivity: 20,          // soglia modalità linea (più bassa = più sensibile)
   });
 
   let state = load();

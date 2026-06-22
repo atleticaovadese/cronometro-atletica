@@ -31,10 +31,11 @@ const Camera = (() => {
 
   // modalità rilevamento: 'ai' (MoveNet) | 'line' (striscia di pixel, veloce)
   let detectMode = 'ai';
-  let lineSensitivity = 30;
+  let lineSensitivity = 20;
   let pcanvas = null, pctx = null, prevGray = null;
-  let lastTrig = [], lineTriggers = 0;
-  const PW = 192, PH = 144, STRIP = 2;   // buffer di analisi + semilarghezza striscia
+  let lastTrig = [], lineEvents = 0;
+  let laneAct = [], laneFlash = [];      // attività e lampeggio per banda (feedback)
+  const PW = 192, PH = 144, STRIP = 3;   // buffer di analisi + semilarghezza striscia
 
   // calibrazione interattiva
   let editing = false;
@@ -155,7 +156,7 @@ const Camera = (() => {
   function arm(startT0, finishCb) {
     t0 = startT0; onFinish = finishCb;
     tracks.clear(); recorded.clear();
-    prevGray = null; lastTrig = []; lineTriggers = 0;   // reset modalità linea
+    prevGray = null; lastTrig = []; lineEvents = 0; laneFlash = [];   // reset modalità linea
     armed = true;
     setStatus('Rilevamento arrivi ATTIVO.');
   }
@@ -201,7 +202,7 @@ const Camera = (() => {
       cur[r] = s / c;
     }
 
-    if (prevGray && armed && t0 !== null) {
+    if (prevGray) {
       const e = cal.laneEdges || [];
       for (let i = 0; i < e.length - 1; i++) {
         const r0 = Math.max(0, Math.floor(e[i] * PH));
@@ -209,13 +210,16 @@ const Camera = (() => {
         let diff = 0, n = 0;
         for (let r = r0; r < r1; r++) { diff += Math.abs(cur[r] - prevGray[r]); n++; }
         const act = n ? diff / n : 0;
+        laneAct[i] = act;                                  // feedback dal vivo
         const lane = cal.lane1Top ? i + 1 : (e.length - 1 - i);
         const last = lastTrig[lane] || 0;
         // fronte di salita oltre soglia + tempo morto per corsia (no doppioni)
         if (act > lineSensitivity && (now - last) > 600) {
           lastTrig[lane] = now;
-          lineTriggers++;
-          if (onFinish) onFinish({ lane, time: now - t0 });
+          laneFlash[i] = now;                              // lampeggia la banda
+          lineEvents++;
+          // registra il tempo SOLO se il rilevamento è armato (gara o test)
+          if (armed && t0 !== null && onFinish) onFinish({ lane, time: now - t0 });
         }
       }
     }
@@ -268,7 +272,7 @@ const Camera = (() => {
       drawOverlay([], vw, vh);
       if (now - lastDiagT > 200) {
         lastDiagT = now;
-        onDiag({ fps: Math.round(fpsEma), detected: lineTriggers, armed });
+        onDiag({ fps: Math.round(fpsEma), detected: lineEvents, armed });
       }
       return;
     }
@@ -342,11 +346,31 @@ const Camera = (() => {
       ctx.fillStyle = '#ff5d73';
       ctx.beginPath(); ctx.arc(fx, 22, 11, 0, Math.PI * 2); ctx.fill();
     }
-    // striscia di analisi (modalità linea)
+    // modalità linea: striscia di analisi + barre attività + lampeggio corsia
     if (detectMode === 'line') {
       const sw = ((STRIP * 2 + 1) / PW) * W;
       ctx.fillStyle = 'rgba(255,93,115,.20)';
       ctx.fillRect(fx - sw / 2, 0, sw, H);
+
+      const e = cal.laneEdges || [];
+      const ACT_MAX = 80, barX = 40, barMax = W * 0.42;
+      const thrX = barX + Math.min(1, lineSensitivity / ACT_MAX) * barMax;
+      for (let i = 0; i < e.length - 1; i++) {
+        const y0 = e[i] * H, y1 = e[i + 1] * H, yc = (y0 + y1) / 2;
+        // lampeggio banda su attraversamento recente
+        if (laneFlash[i] && (lastFrameT - laneFlash[i]) < 500) {
+          ctx.fillStyle = 'rgba(67,233,123,.30)';
+          ctx.fillRect(0, y0, W, y1 - y0);
+        }
+        // barra attività
+        const act = laneAct[i] || 0;
+        const frac = Math.min(1, act / ACT_MAX);
+        ctx.fillStyle = act > lineSensitivity ? '#43e97b' : 'rgba(76,201,240,.6)';
+        ctx.fillRect(barX, yc - 4, frac * barMax, 8);
+      }
+      // tacca della soglia
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(thrX, 0); ctx.lineTo(thrX, H); ctx.stroke();
     }
 
     // atleti (centro busto) + corsia assegnata (verifica calibrazione dal vivo)
