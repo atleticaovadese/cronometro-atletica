@@ -100,8 +100,14 @@ const Camera = (() => {
       canvas._calBound = true;
     }
     setStatus('Avvio fotocamera…');
-    // risoluzione più bassa = analisi AI più veloce = più fps
-    const res = quality === 'hd' ? { w: 1280, h: 720 } : { w: 480, h: 270 };
+    // risoluzione più bassa = più fps (la camera spesso offre fps più alti a bassa ris.)
+    const resMap = {
+      ultra:  { w: 320,  h: 180 },
+      fast:   { w: 480,  h: 270 },
+      medium: { w: 640,  h: 360 },
+      hd:     { w: 1280, h: 720 },
+    };
+    const res = resMap[quality] || resMap.fast;
     stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
       video: {
